@@ -1,0 +1,60 @@
+HW2
+========================================================
+First we get the data and clean the fields. This code chunk is based on an email to the course list by Raphael.
+
+```{r}
+library(GEOmetadb)
+gds = getGEO("GSE40812")
+gds = gds[[1]]
+pdata = pData(gds)
+monocyte.pdata = pdata[pdata$source_name_ch1=="Monocyte-derived Macrophage",]
+monocyte.eset<-gds[,rownames(monocyte.pdata)]
+#characteristic_ch1 indicates VL++ or VL--
+#characteristic_ch1.2 indicates Mock or Poly IC
+monocyte.pdata$HCV = gsub(".*: ", "", monocyte.pdata$characteristics_ch1)
+monocyte.pdata$HCV = ifelse(monocyte.pdata$HCV=="Neg", "neg", "pos")
+monocyte.pdata$treatment = tolower(gsub(".*: ", "", monocyte.pdata$characteristics_ch1.2))
+monocyte.pdata$treat = ifelse(monocyte.pdata$treatment=="mock","mock","poly")
+```
+
+```{r}
+source("http://bioconductor.org/biocLite.R")
+biocLite("limma")
+library(limma)
+library(Biobase)
+library(data.table)
+
+mm_monocyte = model.matrix(~treat, monocyte.pdata)
+fit_monocyte = lmFit(monocyte.eset, mm_monocyte)
+ebay_monocyte = eBayes(fit_monocyte)
+
+tests_monocyte = decideTests(ebay_monocyte,method="separate",adjust.method="BH",p.value=0.05,lfc=log2(1.5))
+diffexp = which(tests_monocyte[,"treatpoly"] != 0)
+length(tests_monocyte[diffexp,1]) ## 1145 is 1 too few.
+```
+
+```{r}
+## which probes are differentially expressed for treatment
+polyic = rownames(tests_monocyte[diffexp,]) 
+
+## in these probes want to compare VL- to VL+
+exprs(monocyte.eset) = exprs(monocyte.eset)[polyic,]
+mm_polyic = model.matrix(~factor(HCV), monocyte.pdata)
+fit_polyic = lmFit(monocyte.eset, mm_polyic)
+ebay_polyic = eBayes(fit_polyic)
+top_polyic = topTable(ebay_polyic, coef="factor(HCV)+", number=Inf, sort.by="p", adjust.method="BH")
+```
+
+```{r}
+dim(exprs(monocyte.eset)) # 1146 40
+
+treatHCV = factor(paste(monocyte.pdata$treat,monocyte.pdata$HCV,sep=""))
+mm = model.matrix(~0+treatHCV)
+#colnames(mm)[5:23] <- paste("ptid.",unique(pData(gse_sm)$ptid),sep="")
+fit_mm = lmFit(monocyte.eset,mm)
+cm = makeContrasts(treatHCVmockpos-treatHCVpolypos,levels=c("treatHCVmockpos", "treatHCVpolypos"))
+fit_cm = contrasts.fit(fit_mm,cm)
+ebay_cm = eBayes(fit_cm)
+top_cm = topTable(ebay_cm,coef="treatHCVmockpos - treatHCVpolypos",number=Inf,sort.by="none")
+sum(tp2$P.Value<0.1) # 43
+```
