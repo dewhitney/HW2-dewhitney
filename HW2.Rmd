@@ -19,7 +19,7 @@ subjst = regexpr("_",monocyte.pdata$title)
 monocyte.pdata$subject = substr(monocyte.pdata$title,subjst+1,subjst+4)
 ```
 
-
+Now that the data are cleaned up a bit we perform the first analysis to determine which probes are differentially expressed according to treatment type.
 ```{r}
 source("http://bioconductor.org/biocLite.R")
 biocLite("limma")
@@ -36,9 +36,11 @@ diffexp = which(tests1[,"treatpoly"] != 0)
 length(tests1[diffexp,1]) ## 1146
 ```
 
+Next we subset the expression set to include only the probes that were differentially expressed in the first limma analysis. Then we run another model in limma that fits treatment and HCV status as 4 factor variables: Poly Ic/VL-, Poly Ic/VL+, Mock/VL-, Mock/VL+ and use contrasts between VL+ and VL- to find which probes are differentially expressed within the treatment categories.
+
 ```{r}
 ## which probes are differentially expressed for treatment
-polyic = rownames(tests1[diffexp,]) 
+polyic = rownames(tests1[diffexp,])
 exprs(monocyte.eset) = exprs(monocyte.eset)[polyic,]
 
 dim(exprs(monocyte.eset)) # 1146 40
@@ -46,12 +48,35 @@ dim(exprs(monocyte.eset)) # 1146 40
 treatHCV = factor(paste(monocyte.pdata$treat,monocyte.pdata$HCV,sep=""))
 mm = model.matrix(~0+treatHCV, monocyte.pdata)
 fit_mm = lmFit(monocyte.eset,mm)
+
 cm = makeContrasts(treatHCVmockneg-treatHCVmockpos,treatHCVpolyneg-treatHCVpolypos,levels=mm)
+
 fit_cm = contrasts.fit(fit_mm,cm)
 ebay_cm = eBayes(fit_cm)
+
 top_cm = topTable(ebay_cm,number=Inf,sort.by="none")
-top_cm[which(top_cm$P.Value<.1),]
+keepers = which(top_cm$P.Value<.1) # 52 of them
 ```
 
+We end up with 52 probes instead of 43. I'm not sure why this is. For now we will construct the heatmap for these 52 probes. The first step is to reorganize the subjects according to VL status and treatment type.
+
+```{r}
+library(pheatmap)
+#Subset the probes we found in the second analysis
+kept = exprs(monocyte.eset)[keepers,]
+
+#Get the phenodata we want to use in the heatmap
+sm_pdata = monocyte.pdata[,c("subject","treat","HCV")]
+#Sort by poly/mock and then by VL-/VL+
+sm_pdata = sm_pdata[order(sm_pdata[,"treat"],sm_pdata[,"HCV"]),]
+kept=kept[,rownames(sm_pdata)] #sorted by treatment type
+colnames(kept)=sm_pdata[,"subject"] #Assign subject ids
+```
+
+Now that the subjects are properly ordered, we can do the heatmap:
+
+```{r fig.width=7, fig.height=6}
+pheatmap(mat=kept,cluster_rows=FALSE,cluster_cols=FALSE)
+```
 
 
